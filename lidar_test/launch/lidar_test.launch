@@ -1,0 +1,8 @@
+<launch>
+
+<!-- Lidar Data Publisher Using YDLIDAR X2 -->
+  <include file="$(find ydlidar_ros_driver)/launch/X2.launch" />
+
+<node pkg="rviz" type="rviz" name="rviz" />
+
+</launch>
