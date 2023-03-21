@@ -1,0 +1,12 @@
+<launch>
+
+<!-- Map File -->
+  <arg name="map_file" default="$(find slam_mapping)/maps/allroom_map.yaml"/>
+
+<!-- Map Server -->
+<!-- Publish: /map --> 
+  <node pkg="map_server" name="map_server" type="map_server" args="$(arg map_file)" />
+
+  <node pkg="rviz" type="rviz" name="rviz" />
+
+</launch>
