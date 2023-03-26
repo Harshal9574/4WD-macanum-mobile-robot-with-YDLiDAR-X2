@@ -5,132 +5,100 @@
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_ros/transform_broadcaster.h>
 #include <cmath>
-
 // Create odometry data publishers
 ros::Publisher odom_data_pub;
 ros::Publisher odom_data_pub_quat;
 nav_msgs::Odometry odomNew;
 nav_msgs::Odometry odomOld;
- 
 // Initial pose
 const double initialX = 0.0;
 const double initialY = 0.0;
 const double initialTheta = 0.00000000001;
 const double PI = 3.141592;
- 
-// Robot physical constants
-const double TICKS_PER_REVOLUTION = 102; // For reference purposes.
-const double WHEEL_RADIUS = 0.04; // Wheel radius in meters
-const double WHEEL_BASE = 0.218; // Center of front axle to center of rear axle
-const double TICKS_PER_METER = 406; // Original was 2800
- 
-// Distance all four wheels have traveled
-double distanceLeft1 = 0;
-double distanceRight1 = 0;
-double distanceLeft2 = 0;
-double distanceRight2 = 0;
- 
-// Flag to see if initial pose has been received
+// mobile robot´s basic values
+const double TICKS_PER_REVOLUTION = 102;
+const double WHEEL_RADIUS = 0.04;
+const double WHEEL_BASE = 0.218;
+const double TICKS_PER_METER = 406;
+double distanceFrontLeft = 0;
+double distanceFrontRight = 0;
+double distanceRearLeft = 0;
+double distanceRearRight = 0;
+// To check if the initial position has been received
 bool initialPoseRecieved = false;
- 
 using namespace std;
- 
-// Get initial_2d message from either Rviz clicks or a manual pose publisher
+// Get initial_2d message from Rviz clicks
 void set_initial_2d(const geometry_msgs::PoseStamped &rvizClick) {
- 
   odomOld.pose.pose.position.x = rvizClick.pose.position.x;
   odomOld.pose.pose.position.y = rvizClick.pose.position.y;
   odomOld.pose.pose.orientation.z = rvizClick.pose.orientation.z;
   initialPoseRecieved = true;
 }
-
-// Calculate the distance the left wheel has traveled since the last cycle
-void Calc_Left1(const std_msgs::Int16& Left1Count) {
- 
-  static int lastCountL1 = 0;
-  if(Left1Count.data != 0 && lastCountL1 != 0) {
-         
-    int left1Ticks = (Left1Count.data - lastCountL1);
- 
-    if (left1Ticks > 10000) {
-      left1Ticks = 0 - (65535 - left1Ticks);
+// calculate distance covered by all four wheels 
+void Calc_FrontLeft(const std_msgs::Int16& FrontLeftCount) {
+  static int lastCountFrontLeft = 0;
+  if(FrontLeftCount.data != 0 && lastCountFrontLeft != 0) {     
+    int frontleftTicks = (FrontLeftCount.data - lastCountFrontLeft);
+    if (frontleftTicks > 10000) {
+      frontleftTicks = 0 - (65535 - frontleftTicks);
     }
-    else if (left1Ticks < -10000) {
-      left1Ticks = 65535-left1Ticks;
+    else if (frontleftTicks < -10000) {
+      frontleftTicks = 65535-frontleftTicks;
     }
     else{}
-    distanceLeft1 = left1Ticks/TICKS_PER_METER;
+    distanceFrontLeft = frontleftTicks/TICKS_PER_METER;
   }
-  lastCountL1 = Left1Count.data;
+  lastCountFrontLeft = FrontLeftCount.data;
 }
-
-// Calculate the distance the right wheel has traveled since the last cycle
-void Calc_Right1(const std_msgs::Int16& Right1Count) {
-   
-  static int lastCountR1 = 0;
-  if(Right1Count.data && lastCountR1 != 0) {
- 
-    int right1Ticks = Right1Count.data - lastCountR1;
-     
-    if (right1Ticks > 10000) {
-      distanceRight1= (0 - (65535 - distanceRight1))/TICKS_PER_METER;
+void Calc_FrontRight(const std_msgs::Int16& FrontRightCount) { 
+  static int lastCountFrontRight = 0;
+  if(FrontRightCount.data && lastCountFrontRight != 0) {
+    int frontrightTicks = FrontRightCount.data - lastCountFrontRight; 
+    if (frontrightTicks > 10000) {
+      distanceFrontRight= (0 - (65535 - distanceFrontRight))/TICKS_PER_METER;
     }
-    else if (right1Ticks < -10000) {
-      right1Ticks = 65535 - right1Ticks;
+    else if (frontrightTicks < -10000) {
+      frontrightTicks = 65535 - frontrightTicks;
     }
     else{}
-    distanceRight1 = right1Ticks/TICKS_PER_METER;
+    distanceFrontRight = frontrightTicks/TICKS_PER_METER;
   }
-  lastCountR1 = Right1Count.data;
+  lastCountFrontRight = FrontRightCount.data;
 }
-
-// Calculate the distance the left wheel has traveled since the last cycle
-void Calc_Left2(const std_msgs::Int16& Left2Count) {
- 
-  static int lastCountL2 = 0;
-  if(Left2Count.data != 0 && lastCountL2 != 0) {
-         
-    int left2Ticks = (Left2Count.data - lastCountL2);
- 
-    if (left2Ticks > 10000) {
-      left2Ticks = 0 - (65535 - left2Ticks);
+void Calc_RearLeft(const std_msgs::Int16& RearLeftCount) {
+  static int lastCountRearLeft = 0;
+  if(RearLeftCount.data != 0 && lastCountRearLeft != 0) {
+    int rearleftTicks = (RearLeftCount.data - lastCountRearLeft);
+    if (rearleftTicks > 10000) {
+      rearleftTicks = 0 - (65535 - rearleftTicks);
     }
-    else if (left2Ticks < -10000) {
-      left2Ticks = 65535-left2Ticks;
+    else if (rearleftTicks < -10000) {
+      rearleftTicks = 65535-rearleftTicks;
     }
     else{}
-    distanceLeft2 = left2Ticks/TICKS_PER_METER;
+    distanceRearLeft = rearleftTicks/TICKS_PER_METER;
   }
-  lastCountL2 = Left2Count.data;
+  lastCountRearLeft = RearLeftCount.data;
 }
- 
-// Calculate the distance the right wheel has traveled since the last cycle
-void Calc_Right2(const std_msgs::Int16& Right2Count) {
-   
-  static int lastCountR2 = 0;
-  if(Right2Count.data != 0 && lastCountR2 != 0) {
- 
-    int right2Ticks = Right2Count.data - lastCountR2;
-     
-    if (right2Ticks > 10000) {
-      distanceRight2 = (0 - (65535 - distanceRight2))/TICKS_PER_METER;
+void Calc_RearRight(const std_msgs::Int16& RearRightCount) {
+  static int lastCountRearRight = 0;
+  if(RearRightCount.data != 0 && lastCountRearRight != 0) {
+    int rearrightTicks = RearRightCount.data - lastCountRearRight;
+    if (rearrightTicks > 10000) {
+      distanceRearRight = (0 - (65535 - distanceRearRight))/TICKS_PER_METER;
     }
-    else if (right2Ticks < -10000) {
-      right2Ticks = 65535 - right2Ticks;
+    else if (rearrightTicks < -10000) {
+      rearrightTicks = 65535 - rearrightTicks;
     }
     else{}
-    distanceRight2 = right2Ticks/TICKS_PER_METER;
+    distanceRearRight = rearrightTicks/TICKS_PER_METER;
   }
-  lastCountR2 = Right2Count.data;
+  lastCountRearRight = RearRightCount.data;
 }
-
 // Publish a nav_msgs::Odometry message in quaternion format
 void publish_quat() {
- 
   tf2::Quaternion q;
-         
   q.setRPY(0, 0, odomNew.pose.pose.orientation.z);
- 
   nav_msgs::Odometry quatOdom;
   quatOdom.header.stamp = odomNew.header.stamp;
   quatOdom.header.frame_id = "odom";
@@ -148,7 +116,6 @@ void publish_quat() {
   quatOdom.twist.twist.angular.x = odomNew.twist.twist.angular.x;
   quatOdom.twist.twist.angular.y = odomNew.twist.twist.angular.y;
   quatOdom.twist.twist.angular.z = odomNew.twist.twist.angular.z;
- 
   for(int i = 0; i<36; i++) {
     if(i == 0 || i == 7 || i == 14) {
       quatOdom.pose.covariance[i] = .01;
@@ -160,23 +127,18 @@ void publish_quat() {
        quatOdom.pose.covariance[i] = 0;
      }
   }
- 
   odom_data_pub_quat.publish(quatOdom);
 }
- 
 void update_odom() {
- 
   // Calculate the average distance
-  double cycleDistanceL = (distanceLeft1 + distanceLeft2) / 2;
-  double cycleDistanceR = (distanceRight1 + distanceRight2) / 2;
-  double cycleDistance = (cycleDistanceL + cycleDistanceR) / 2;
-   
-  // Calculate the number of radians the robot has turned since the last cycle
-  double delta = (cycleDistanceR - cycleDistanceL);
+  double cycleDistanceLeft = (distanceFrontLeft + distanceRearLeft) / 2;
+  double cycleDistanceRear = (distanceFrontRight + distanceRearRight) / 2;
+  double cycleDistance = (cycleDistanceLeft + cycleDistanceRear) / 2;
+  // Calculate the number of radians the robot has turned
+  double delta = (cycleDistanceRear - cycleDistanceLeft);
   double cycleAngle = atan2(delta, WHEEL_BASE); 
   // Average angle during the last cycle
   double avgAngle = cycleAngle/2 + odomOld.pose.pose.orientation.z;
-     
   if (avgAngle > PI) {
     avgAngle -= 2*PI;
   }
@@ -184,12 +146,10 @@ void update_odom() {
     avgAngle += 2*PI;
   }
   else{}
- 
   // Calculate the new pose (x, y, and theta)
   odomNew.pose.pose.position.x = odomOld.pose.pose.position.x + cos(avgAngle)*cycleDistance;
   odomNew.pose.pose.position.y = odomOld.pose.pose.position.y + sin(avgAngle)*cycleDistance;
   odomNew.pose.pose.orientation.z = cycleAngle + odomOld.pose.pose.orientation.z;
- 
   // Prevent lockup from a single bad cycle
   if (isnan(odomNew.pose.pose.position.x) || isnan(odomNew.pose.pose.position.y)
      || isnan(odomNew.pose.pose.position.z)) {
@@ -197,8 +157,7 @@ void update_odom() {
     odomNew.pose.pose.position.y = odomOld.pose.pose.position.y;
     odomNew.pose.pose.orientation.z = odomOld.pose.pose.orientation.z;
   }
- 
-  // Make sure theta stays in the correct range
+  // theta stays in the correct range
   if (odomNew.pose.pose.orientation.z > PI) {
     odomNew.pose.pose.orientation.z -= 2 * PI;
   }
@@ -206,24 +165,19 @@ void update_odom() {
     odomNew.pose.pose.orientation.z += 2 * PI;
   }
   else{}
- 
   // Compute the velocity
   odomNew.header.stamp = ros::Time::now();
   odomNew.twist.twist.linear.x = cycleDistance/(odomNew.header.stamp.toSec() - odomOld.header.stamp.toSec());
   odomNew.twist.twist.angular.z = cycleAngle/(odomNew.header.stamp.toSec() - odomOld.header.stamp.toSec()); 
-
   // Save the pose data for the next cycle
   odomOld.pose.pose.position.x = odomNew.pose.pose.position.x;
   odomOld.pose.pose.position.y = odomNew.pose.pose.position.y;
   odomOld.pose.pose.orientation.z = odomNew.pose.pose.orientation.z;
   odomOld.header.stamp = odomNew.header.stamp;
- 
   // Publish the odometry message
   odom_data_pub.publish(odomNew);
 }
-
 int main(int argc, char **argv) {
-   
   // Set the data fields of the odometry message
   odomNew.header.frame_id = "odom";
   odomNew.pose.pose.position.z = 0;
@@ -238,28 +192,21 @@ int main(int argc, char **argv) {
   odomOld.pose.pose.position.x = initialX;
   odomOld.pose.pose.position.y = initialY;
   odomOld.pose.pose.orientation.z = initialTheta;
- 
   // Launch ROS and create a node
   ros::init(argc, argv, "ekf_odom_pub");
   ros::NodeHandle node;
- 
   // Subscribe to ROS topics
-  ros::Subscriber subForRight1Count = node.subscribe("right1_ticks", 100, Calc_Right1, ros::TransportHints().tcpNoDelay());
-  ros::Subscriber subForLeft1Count = node.subscribe("left1_ticks", 100, Calc_Left1, ros::TransportHints().tcpNoDelay());
-  ros::Subscriber subForRight2Count = node.subscribe("right2_ticks", 100, Calc_Right2, ros::TransportHints().tcpNoDelay());
-  ros::Subscriber subForLeft2Count = node.subscribe("left2_ticks", 100, Calc_Left2, ros::TransportHints().tcpNoDelay());
+  ros::Subscriber subForFrontRightCount = node.subscribe("frontright_ticks", 100, Calc_FrontRight, ros::TransportHints().tcpNoDelay());
+  ros::Subscriber subForFrontLeftCount = node.subscribe("frontleft_ticks", 100, Calc_FrontLeft, ros::TransportHints().tcpNoDelay());
+  ros::Subscriber subForRearRightCount = node.subscribe("rearright_ticks", 100, Calc_RearRight, ros::TransportHints().tcpNoDelay());
+  ros::Subscriber subForRearLeftCount = node.subscribe("rearleft_ticks", 100, Calc_RearLeft, ros::TransportHints().tcpNoDelay());
   ros::Subscriber subInitialPose = node.subscribe("initial_2d", 1, set_initial_2d);
- 
   // Publisher of simple odom message where orientation.z is an euler angle
   odom_data_pub = node.advertise<nav_msgs::Odometry>("odom_data_euler", 100);
- 
   // Publisher of full odom message where orientation is quaternion
   odom_data_pub_quat = node.advertise<nav_msgs::Odometry>("odom_data_quat", 100);
- 
   ros::Rate loop_rate(10); 
-     
   while(ros::ok()) {
-     
     if(initialPoseRecieved) {
       update_odom();
       publish_quat();
@@ -267,6 +214,5 @@ int main(int argc, char **argv) {
     ros::spinOnce();
     loop_rate.sleep();
   }
- 
   return 0;
 }
