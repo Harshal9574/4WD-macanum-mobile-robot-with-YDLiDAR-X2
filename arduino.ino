@@ -1,657 +1,508 @@
 #include <ros.h>
 #include <std_msgs/Int16.h>
 #include <geometry_msgs/Twist.h>
-
-// Handles startup and shutdown of ROS
 ros::NodeHandle nh;
-
-////////////////// Tick Data Publishing Variables and Constants ///////////////
-
-// Encoder output to Arduino Interrupt pin. Tracks the tick count.
-#define ENC_IN_LEFT1_A 2
-#define ENC_IN_RIGHT1_A 3
-#define ENC_IN_LEFT2_A 18
-#define ENC_IN_RIGHT2_A 19
-
-// Other encoder output to Arduino to keep track of wheel direction
-// Tracks the direction of rotation.
-#define ENC_IN_LEFT1_B 22
-#define ENC_IN_RIGHT1_B 23
-#define ENC_IN_LEFT2_B 32
-#define ENC_IN_RIGHT2_B 33
-
-// True = Forward; False = Reverse
-boolean Direction_left1 = true;
-boolean Direction_right1 = true;
-boolean Direction_left2 = true;
-boolean Direction_right2 = true;
-
-// Minumum and maximum values for 16-bit integers
-// Range of 65,535
+// Encoder ENC_A pin to Arduino Interrupt pin, which tracks the encoder tick count.
+// Encoder ENC_B pin to Arduino Interrupt pin, which tracks the direction of encoder.
+#define ENC_IN_FRONTLEFT_A 2
+#define ENC_IN_FRONTLEFT_B 22
+#define ENC_IN_FRONTRIGHT_A 3
+#define ENC_IN_FRONTRIGHT_B 23
+#define ENC_IN_REARLEFT_A 18
+#define ENC_IN_REARLEFT_B 32
+#define ENC_IN_REARRIGHT_A 19
+#define ENC_IN_REARRIGHT_B 33
+// true fOR forward direction and false for reverse direction 
+boolean Direction_frontleft = true;
+boolean Direction_frontright = true;
+boolean Direction_rearleft = true;
+boolean Direction_rearright = true;
+// Minumum and maximum values for 16-bit integers, Range of 65,535
 const int encoder_minimum = -32768;
 const int encoder_maximum = 32767;
-
-// Keep track of the number of wheel ticks
-std_msgs::Int16 left1_wheel_tick_count;
-ros::Publisher Left1Pub("left1_ticks", &left1_wheel_tick_count);
-
-std_msgs::Int16 right1_wheel_tick_count;
-ros::Publisher Right1Pub("right1_ticks", &right1_wheel_tick_count);
-
-std_msgs::Int16 left2_wheel_tick_count;
-ros::Publisher Left2Pub("left2_ticks", &left2_wheel_tick_count);
-
-std_msgs::Int16 right2_wheel_tick_count;
-ros::Publisher Right2Pub("right2_ticks", &right2_wheel_tick_count);
-
+// publisher for a message representing the tick count of wheels
+std_msgs::Int16 frontleft_wheel_tick_count;
+ros::Publisher FrontLeftPub("frontleft_ticks", &frontleft_wheel_tick_count);
+std_msgs::Int16 frontright_wheel_tick_count;
+ros::Publisher FrontRightPub("frontright_ticks", &frontright_wheel_tick_count);
+std_msgs::Int16 rearleft_wheel_tick_count;
+ros::Publisher RearLeftPub("rearleft_ticks", &rearleft_wheel_tick_count);
+std_msgs::Int16 rearright_wheel_tick_count;
+ros::Publisher RearRightPub("rrearight_ticks", &rearright_wheel_tick_count);
 // Time interval for measurements in milliseconds
 const int interval = 200;
 long previousMillis = 0;
 long currentMillis = 0;
-
-////////////////// Motor Controller Variables and Constants ///////////////////
-
-const int enA_left1 = 6;
-const int in1_left1 = 24;
-const int in2_left1 = 25;
-
-const int enB_right1 = 7;
-const int in3_right1 = 26;
-const int in4_right1 = 27;
-
-const int enA_left2 = 8;
-const int in1_left2 = 28;
-const int in2_left2 = 29;
-
-const int enB_right2 = 9;
-const int in3_right2 = 30;
-const int in4_right2 = 31;
-
-// How much the PWM value can change each cycle
+// DC motors connections
+const int enA_frontleft = 6;
+const int in1_frontleft = 24;
+const int in2_frontleft = 25;
+const int enB_frontright = 7;
+const int in3_frontright = 26;
+const int in4_frontright = 27;
+const int enA_rearleft = 8;
+const int in1_rearleft = 28;
+const int in2_rearleft = 29;
+const int enB_rearright = 9;
+const int in3_rearright = 30;
+const int in4_rearright = 31;
+// PWM value change in each cycle
 const int PWM_INCREMENT = 1;
- 
 // Number of ticks per wheel revolution.
-const int TICKS_PER_REVOLUTION = 102; 
- 
+const int TICKS_PER_REVOLUTION = 102;  
 // Wheel radius in meters
-const double WHEEL_RADIUS = 0.04; 
- 
-// Distance from center of the left tire to the center of the right tire in m
-const double WHEEL_BASE = 0.218;
- 
-// Number of ticks a wheel makes moving a linear distance of 1 meter
-// This value was measured manually.
+const double WHEEL_RADIUS = 0.04;
+// Distance from center of the left wheel to the center of the right wheel in m
+const double WHEEL_BASE = 0.218; 
+// A wheel moves a 1 meter linear distance in the specified number of ticks. (TICKS_PER_REVOLUTION / 2*pi*r)
 const double TICKS_PER_METER = 406; 
- 
-// Proportional constant, which was measured by measuring the 
-// PWM-Linear Velocity relationship for the robot.
 const int K_P = 278;
- 
-// Y-intercept for the PWM-Linear Velocity relationship for the robot
 const int b = 52;
- 
-// Correction multiplier for drift. Chosen through experimentation.
 const int DRIFT_MULTIPLIER = 120;
- 
-// Turning PWM output (0 = min, 255 = max for PWM values)
 const int PWM_TURN = 255;
- 
-// Set maximum and minimum limits for the PWM values
-const int PWM_MIN = 200; 
-const int PWM_MAX = 255; 
-
-// Set linear velocity and PWM variable values for each wheel
-double velLeft1Wheel = 0;
-double velRight1Wheel = 0;
-double velLeft2Wheel = 0;
-double velRight2Wheel = 0;
-double pwmLeft1Req = 0;
-double pwmRight1Req = 0;
-double pwmLeft2Req = 0;
-double pwmRight2Req = 0;
-
+const int PWM_MIN = 200; // about 0.5 m/s
+const int PWM_MAX = 255; // about 0.7 m/s
+double velFrontLeftWheel = 0;
+double velFrontRightWheel = 0;
+double velRearLeftWheel = 0;
+double velRearRightWheel = 0;
+double pwmFrontLeftReq = 0;
+double pwmFrontRightReq = 0;
+double pwmRearLeftReq = 0;
+double pwmRearRightReq = 0;
 // Record the time that the last velocity command was received
 double lastCmdVelReceived = 0;
-
-/////////////////////// Tick Data Publishing Functions ////////////////////////
- 
-// Increment the number of ticks
-
-void right1_wheel_tick() {
-    int val = digitalRead(ENC_IN_RIGHT1_B);
+// counts the number of ticks of each encoder
+void frontright_wheel_tick() {
+    int val = digitalRead(ENC_IN_FRONTRIGHT_B);
     if (val == LOW) {
-        Direction_right1 = false; // Reverse
+        Direction_frontright = false; 
     }
     else {
-        Direction_right1 = true; // Forward
+        Direction_frontright = true;
     }
-    if (Direction_right1) {
-        if (right1_wheel_tick_count.data == encoder_maximum) {
-            right1_wheel_tick_count.data = encoder_minimum;
+    if (Direction_frontright) {
+        if (frontright_wheel_tick_count.data == encoder_maximum) {
+            frontright_wheel_tick_count.data = encoder_minimum;
         }
         else {
-            right1_wheel_tick_count.data++;  
+            frontright_wheel_tick_count.data++;  
         }    
     }
     else {
-        if (right1_wheel_tick_count.data == encoder_minimum) {
-            right1_wheel_tick_count.data = encoder_maximum;
+        if (frontright_wheel_tick_count.data == encoder_minimum) {
+            frontright_wheel_tick_count.data = encoder_maximum;
         }
         else {
-            right1_wheel_tick_count.data--;  
+            frontright_wheel_tick_count.data--;  
         }   
     }
 }
-
-void left1_wheel_tick() {
-    // Read the value for the encoder for the left wheel
-    int val = digitalRead(ENC_IN_LEFT1_B);
- 
+void frontleft_wheel_tick() {
+    int val = digitalRead(ENC_IN_FRONTLEFT_B);
     if (val == LOW) {
-      Direction_left1 = true; // Reverse
+      Direction_frontleft = true; 
     }
     else {
-      Direction_left1 = false; // Forward
+      Direction_frontleft = false; 
     }
-   
-    if (Direction_left1) {
-      if (left1_wheel_tick_count.data == encoder_maximum) {
-        left1_wheel_tick_count.data = encoder_minimum;
+    if (Direction_frontleft) {
+      if (frontleft_wheel_tick_count.data == encoder_maximum) {
+        frontleft_wheel_tick_count.data = encoder_minimum;
       }
       else {
-        left1_wheel_tick_count.data++;  
+        frontleft_wheel_tick_count.data++;  
       }  
     }
     else {
-      if (left1_wheel_tick_count.data == encoder_minimum) {
-        left1_wheel_tick_count.data = encoder_maximum;
+      if (frontleft_wheel_tick_count.data == encoder_minimum) {
+        frontleft_wheel_tick_count.data = encoder_maximum;
       }
       else {
-        left1_wheel_tick_count.data--;  
+        frontleft_wheel_tick_count.data--;  
       }   
     }
 }
-
-void right2_wheel_tick() {
-    int val = digitalRead(ENC_IN_RIGHT2_B);
+void rearright_wheel_tick() {
+    int val = digitalRead(ENC_IN_REARRIGHT_B);
     if (val == LOW) {
-        Direction_right2 = false; // Reverse
+        Direction_rearright = false; 
     }
     else {
-        Direction_right2 = true; // Forward
+        Direction_rearright = true; 
     }
-    if (Direction_right2) {
-        if (right2_wheel_tick_count.data == encoder_maximum) {
-            right2_wheel_tick_count.data = encoder_minimum;
+    if (Direction_rearright) {
+        if (rearright_wheel_tick_count.data == encoder_maximum) {
+            rearright_wheel_tick_count.data = encoder_minimum;
         }
         else {
-            right2_wheel_tick_count.data++;  
+            rearright_wheel_tick_count.data++;  
         }    
     }
     else {
-        if (right2_wheel_tick_count.data == encoder_minimum) {
-            right2_wheel_tick_count.data = encoder_maximum;
+        if (rearright_wheel_tick_count.data == encoder_minimum) {
+            rearright_wheel_tick_count.data = encoder_maximum;
         }
         else {
-            right2_wheel_tick_count.data--;  
+            rearright_wheel_tick_count.data--;  
         }   
     }
 }
-
-void left2_wheel_tick() {
-    int val = digitalRead(ENC_IN_LEFT2_B);
+void rearleft_wheel_tick() {
+    int val = digitalRead(ENC_IN_REARLEFT_B);
     if (val == LOW) {
-        Direction_left2 = false; // Reverse
+        Direction_rearleft = false; 
     }
     else {
-        Direction_left2 = true; // Forward
+        Direction_rearleft = true; 
     }
-   if (Direction_left2) {
-        if (left2_wheel_tick_count.data == encoder_maximum) {
-            left2_wheel_tick_count.data = encoder_minimum;
+   if (Direction_rearleft) {
+        if (rearleft_wheel_tick_count.data == encoder_maximum) {
+            rearleft_wheel_tick_count.data = encoder_minimum;
         }
         else {
-            left2_wheel_tick_count.data++;  
+            rearleft_wheel_tick_count.data++;  
         }    
     }
     else {
-        if (left2_wheel_tick_count.data == encoder_minimum) {
-            left2_wheel_tick_count.data = encoder_maximum;
+        if (rearleft_wheel_tick_count.data == encoder_minimum) {
+            rearleft_wheel_tick_count.data = encoder_maximum;
         }
         else {
-            left2_wheel_tick_count.data--;  
+            rearleft_wheel_tick_count.data--;  
         }   
     }
 }
-
-/////////////////////// Motor Controller Functions ////////////////////////////
- 
-void calc_vel_left1_wheel(){
-   
-  // Previous timestamp
+// Calculate the wheels linear velocity in m/s every time 
+void calc_vel_frontleft_wheel(){
   static double prevTime = 0;
-   
-  // Variable gets created and initialized the first time a function is called.
-  static int prevLeft1Count = 0;
- 
-  // Manage rollover and rollunder when we get outside the 16-bit integer range 
-  int numOfTicks = (65535 + left1_wheel_tick_count.data - prevLeft1Count) % 65535;
- 
-  // If we have had a big jump, it means the tick count has rolled over.
+  static int prevFrontLeftCount = 0;
+  int numOfTicks = (65535 + frontleft_wheel_tick_count.data - prevFrontLeftCount) % 65535;
   if (numOfTicks > 10000) {
         numOfTicks = 0 - (65535 - numOfTicks);
   }
+  velFrontLeftWheel = numOfTicks/TICKS_PER_METER/((millis()/1000)-prevTime);
  
-  // Calculate wheel velocity in meters per second
-  velLeft1Wheel = numOfTicks/TICKS_PER_METER/((millis()/1000)-prevTime);
- 
-  // Keep track of the previous tick count
-  prevLeft1Count = left1_wheel_tick_count.data; 
- 
-  // Update the timestamp
+  prevFrontLeftCount = frontleft_wheel_tick_count.data; 
   prevTime = (millis()/1000);
 }
- 
-void calc_vel_right1_wheel(){
-   
-  // Previous timestamp
+void calc_vel_frontright_wheel(){
   static double prevTime = 0;
-   
-  // Variable gets created and initialized the first time a function is called.
-  static int prevRight1Count = 0;
- 
-  // Manage rollover and rollunder when we get outside the 16-bit integer range 
-  int numOfTicks = (65535 +  right1_wheel_tick_count.data - prevRight1Count) % 65535;
- 
+  static int prevFrontRightCount = 0;
+  int numOfTicks = (65535 +  frontright_wheel_tick_count.data - prevFrontRightCount) % 65535;
   if (numOfTicks > 10000) {
         numOfTicks = 0 - (65535 - numOfTicks);
   }
- 
-  // Calculate wheel velocity in meters per second
-  velRight1Wheel = numOfTicks/TICKS_PER_METER/((millis()/1000)-prevTime);
- 
-  prevRight1Count = right1_wheel_tick_count.data;
-   
+  velFrontRightWheel = numOfTicks/TICKS_PER_METER/((millis()/1000)-prevTime);
+  prevFrontRightCount = frontright_wheel_tick_count.data;
   prevTime = (millis()/1000);
- 
 }
-
-void calc_vel_left2_wheel(){
-   
-  // Previous timestamp
+void calc_vel_rearleft_wheel(){
    static double prevTime = 0;
-   
-  // Variable gets created and initialized the first time a function is called.
-   static int prevLeft2Count = 0;
- 
-  // Manage rollover and rollunder when we get outside the 16-bit integer range 
-   int numOfTicks = (65535 + left2_wheel_tick_count.data - prevLeft2Count) % 65535;
- 
-  // If we have had a big jump, it means the tick count has rolled over.
+   static int prevRearLeftCount = 0; 
+   int numOfTicks = (65535 + rearleft_wheel_tick_count.data - prevRearLeftCount) % 65535;
    if (numOfTicks > 10000) {
          numOfTicks = 0 - (65535 - numOfTicks);
    }
- 
-  // Calculate wheel velocity in meters per second
-   velLeft2Wheel = numOfTicks/TICKS_PER_METER/((millis()/1000)-prevTime);
- 
-  // Keep track of the previous tick count
-   prevLeft2Count = left2_wheel_tick_count.data;
- 
-  // Update the timestamp
+   velRearLeftWheel = numOfTicks/TICKS_PER_METER/((millis()/1000)-prevTime);
+   prevRearLeftCount = rearleft_wheel_tick_count.data;
    prevTime = (millis()/1000);
 }
-
-void calc_vel_right2_wheel(){
-   
-  // Previous timestamp
+void calc_vel_rearright_wheel(){
    static double prevTime = 0;
-   
-  // Variable gets created and initialized the first time a function is called.
-   static int prevRight2Count = 0;
- 
-  // Manage rollover and rollunder when we get outside the 16-bit integer range 
-   int numOfTicks = (65535 + right2_wheel_tick_count.data - prevRight2Count) % 65535;
- 
+   static int prevRearRightCount = 0;
+   int numOfTicks = (65535 + rearright_wheel_tick_count.data - prevRearRightCount) % 65535;
    if (numOfTicks > 10000) {
          numOfTicks = 0 - (65535 - numOfTicks);
    }
- 
-  // Calculate wheel velocity in meters per second
-   velRight2Wheel = numOfTicks/TICKS_PER_METER/((millis()/1000)-prevTime);
- 
-   prevRight2Count = right2_wheel_tick_count.data;
-   
+   velRearRightWheel = numOfTicks/TICKS_PER_METER/((millis()/1000)-prevTime);
+   prevRearRightCount = rearright_wheel_tick_count.data;
    prevTime = (millis()/1000);
- 
 }
-
-// Take the velocity command as input and calculate the PWM values.
 void calc_pwm_values(const geometry_msgs::Twist& cmdVel) {
-   
-  // Record timestamp of last velocity command received
   lastCmdVelReceived = (millis()/1000);
-   
   // Calculate the PWM value given the desired velocity
-  pwmLeft1Req = K_P * cmdVel.linear.x + b;
-  pwmRight1Req = K_P * cmdVel.linear.x + b;
-  pwmLeft2Req = K_P * cmdVel.linear.x + b;
-  pwmRight2Req = K_P * cmdVel.linear.x + b;
-
-  // Check if we need to turn 
+  pwmFrontLeftReq = K_P * cmdVel.linear.x + b;
+  pwmFrontRightReq = K_P * cmdVel.linear.x + b;
+  pwmFrontLeftReq = K_P * cmdVel.linear.x + b;
+  pwmFrontRightReq = K_P * cmdVel.linear.x + b;
   if (cmdVel.linear.x == 0 && cmdVel.angular.z != 0.0) {
-
+  // turn robot in left direction
     if (cmdVel.angular.z > 0.0) {
-      pwmLeft1Req = -PWM_TURN;
-      pwmRight1Req = PWM_TURN;
-      pwmLeft2Req = -PWM_TURN;
-      pwmRight2Req = PWM_TURN;
-    }
-    // Turn right    
+      pwmFrontLeftReq = -PWM_TURN;
+      pwmFrontRightReq = PWM_TURN;
+      pwmRearLeftReq = -PWM_TURN;
+      pwmRearRightReq = PWM_TURN;
+    }  
+    // turn robot in right direction 
     else {
-      pwmLeft1Req = PWM_TURN;
-      pwmRight1Req = -PWM_TURN;
-      pwmLeft2Req = PWM_TURN;
-      pwmRight2Req = -PWM_TURN;
+      pwmFrontLeftReq = PWM_TURN;
+      pwmFrontRightReq = -PWM_TURN;
+      pwmRearLeftReq = PWM_TURN;
+      pwmRearRightReq = -PWM_TURN;
     }
   }
-
+ // forward direction & reverse direction
   else if (cmdVel.linear.x != 0 && cmdVel.angular.z == 0.0) {
 
-    static double prevDiff1 = 0;
-    static double prevDiff2 = 0;
-    static double prevPrevDiff1 = 0;
-    static double prevPrevDiff2 = 0;
-    double currDifference1 = velLeft1Wheel - velRight1Wheel; 
-    double currDifference2 = velLeft2Wheel - velRight2Wheel; 
-    double avgDifference1 = (prevDiff1+prevPrevDiff1+currDifference1)/3;
-    double avgDifference2 = (prevDiff2+prevPrevDiff2+currDifference2)/3;
-    prevPrevDiff1 = prevDiff1;
-    prevPrevDiff2 = prevDiff2;
-    prevDiff1 = currDifference1;
-    prevDiff2 = currDifference2;
- 
-    // Correct PWM values of both wheels to make the vehicle go straight
-    pwmLeft1Req -= (int)(avgDifference1 * DRIFT_MULTIPLIER);
-    pwmRight1Req += (int)(avgDifference1 * DRIFT_MULTIPLIER);
-    pwmLeft2Req -= (int)(avgDifference2 * DRIFT_MULTIPLIER);
-    pwmRight2Req += (int)(avgDifference2 * DRIFT_MULTIPLIER); 
+    static double prevFrontDiff = 0;
+    static double prevRearDiff = 0;
+    static double prevFrontPrevDiff = 0;
+    static double prevRearPrevDiff = 0;
+    double currFrontDifference = velFrontLeftWheel - velFrontRightWheel; 
+    double currRearDifference = velRearLeftWheel - velRearRightWheel; 
+    double avgFrontDifference = (prevFrontDiff+prevFrontDiff+currFrontDifference)/3;
+    double avgRearDifference = (prevRearDiff+prevRearPrevDiff+currRearDifference)/3;
+    prevFrontPrevDiff = prevFrontDiff;
+    prevRearPrevDiff = prevRearDiff;
+    prevFrontDiff = currFrontDifference;
+    prevRearDiff = currRearDifference;
+    pwmFrontLeftReq -= (int)(avgFrontDifference * DRIFT_MULTIPLIER);
+    pwmFrontRightReq += (int)(avgFrontDifference * DRIFT_MULTIPLIER);
+    pwmRearLeftReq -= (int)(avgRearDifference * DRIFT_MULTIPLIER);
+    pwmRearRightReq += (int)(avgRearDifference * DRIFT_MULTIPLIER); 
   }
-
   else {
-    pwmLeft1Req = 0;
-    pwmRight1Req = 0;
-    pwmLeft2Req = 0;
-    pwmRight2Req = 0;
+    pwmFrontLeftReq = 0;
+    pwmFrontRightReq = 0;
+    pwmRearLeftReq = 0;
+    pwmRearRightReq = 0;
   }
-  
-  // Handle low PWM values
-  if (abs(pwmLeft1Req) < PWM_MIN) {
-    pwmLeft1Req = 0;
+  if (abs(pwmFrontLeftReq) < PWM_MIN) {
+    pwmFrontLeftReq = 0;
   }
-  if (abs(pwmRight1Req) < PWM_MIN) {
-    pwmRight1Req = 0;  
+  if (abs(pwmFrontRightReq) < PWM_MIN) {
+    pwmFrontRightReq = 0;  
   }  
-  if (abs(pwmLeft2Req) < PWM_MIN) {
-    pwmLeft2Req = 0;
+  if (abs(pwmRearLeftReq) < PWM_MIN) {
+    pwmRearLeftReq = 0;
   }
-  if (abs(pwmRight2Req) < PWM_MIN) {
-    pwmRight2Req = 0;  
+  if (abs(pwmRearRightReq) < PWM_MIN) {
+    pwmRearRightReq = 0;  
   } 
 }
-
 void set_pwm_values() {
- 
-  // These variables will hold our desired PWM values
-  static int pwmLeft1Out = 0;
-  static int pwmRight1Out = 0;
-  static int pwmLeft2Out = 0;
-  static int pwmRight2Out = 0;
- 
-  // If the required PWM is of opposite sign as the output PWM, we want to
-  // stop the car before switching direction
+  static int pwmFrontLeftOut = 0;
+  static int pwmFrontRightOut = 0;
+  static int pwmRearLeftOut = 0;
+  static int pwmRearRightOut = 0;
   static bool stopped = false;
-  if ((pwmLeft1Req * velLeft1Wheel < 0 && pwmLeft1Out != 0) ||
-      (pwmRight1Req * velRight1Wheel < 0 && pwmRight1Out != 0)) {
-    pwmLeft1Req = 0;
-    pwmRight1Req = 0;
+  if ((pwmFrontLeftReq * velFrontLeftWheel < 0 && pwmFrontLeftOut != 0) ||
+      (pwmFrontRightReq * velFrontRightWheel < 0 && pwmFrontRightOut != 0)) {
+    pwmFrontLeftReq = 0;
+    pwmFrontRightReq = 0;
   }
-  
-  if ((pwmLeft2Req * velLeft2Wheel < 0 && pwmLeft2Out != 0) ||
-      (pwmRight2Req * velRight2Wheel < 0 && pwmRight2Out != 0)) {
-    pwmLeft2Req = 0;
-    pwmRight2Req = 0;
+  if ((pwmRearLeftReq * velRearLeftWheel < 0 && pwmRearLeftOut != 0) ||
+      (pwmRearRightReq * velRearRightWheel < 0 && pwmRearRightOut != 0)) {
+    pwmRearLeftReq = 0;
+    pwmRearRightReq = 0;
   }
-
   // Set the direction of the motors
-  if (pwmLeft1Req > 0) { // Front left wheel forward
-    digitalWrite(in1_left1, HIGH);
-    digitalWrite(in2_left1, LOW);
+  // Front left wheel forward
+  if (pwmFrontLeftReq > 0) { 
+    digitalWrite(in1_frontleft, HIGH);
+    digitalWrite(in2_frontleft, LOW);
   }
-  else if (pwmLeft1Req < 0) { // Front left wheel reverse
-    digitalWrite(in1_left1, LOW);
-    digitalWrite(in2_left1, HIGH);
+  // Front left wheel reverse
+  else if (pwmFrontLeftReq < 0) { 
+    digitalWrite(in1_frontleft, LOW);
+    digitalWrite(in2_frontleft, HIGH);
   }
-  else if (pwmLeft1Req == 0 && pwmLeft1Out == 0 ) { // Front left wheel stop
-    digitalWrite(in1_left1, LOW);
-    digitalWrite(in2_left1, LOW);
+  // Front left wheel stop
+  else if (pwmFrontLeftReq == 0 && pwmFrontLeftOut == 0 ) { 
+    digitalWrite(in1_frontleft, LOW);
+    digitalWrite(in2_frontleft, LOW);
   }
-  else { // Front left wheel stop
-    digitalWrite(in1_left1, LOW);
-    digitalWrite(in2_left1, LOW); 
+  else {
+    digitalWrite(in1_frontleft, LOW);
+    digitalWrite(in2_frontleft, LOW); 
   }
-
-  if (pwmRight1Req > 0) { // Front right wheel forward
-    digitalWrite(in3_right1, HIGH);
-    digitalWrite(in4_right1, LOW);
+  // Front right wheel forward
+  if (pwmFrontRightReq > 0) { 
+    digitalWrite(in3_frontright, HIGH);
+    digitalWrite(in4_frontright, LOW);
   }
-  else if (pwmRight1Req < 0) { // Front right wheel reverse
-    digitalWrite(in3_right1, LOW);
-    digitalWrite(in4_right1, HIGH);
+  // Front right wheel reverse
+  else if (pwmFrontRightReq < 0) { 
+    digitalWrite(in3_frontright, LOW);
+    digitalWrite(in4_frontright, HIGH);
   }
-  else if (pwmRight1Req == 0 && pwmRight1Out == 0) { // Front right wheel stop
-    digitalWrite(in3_right1, LOW);
-    digitalWrite(in4_right1, LOW);
+  // Front right wheel stop
+  else if (pwmFrontRightReq == 0 && pwmFrontRightOut == 0) { 
+    digitalWrite(in3_frontright, LOW);
+    digitalWrite(in4_frontright, LOW);
   }
-  else { // Front right wheel stop
-    digitalWrite(in3_right1, LOW);
-    digitalWrite(in4_right1, LOW); 
+  else {
+    digitalWrite(in3_frontright, LOW);
+    digitalWrite(in4_frontright, LOW); 
   }
-
-  if (pwmLeft2Req > 0) { // rear left wheel forward
-    digitalWrite(in1_left2, HIGH);
-    digitalWrite(in2_left2, LOW);
+  // rear left wheel forward
+  if (pwmRearLeftReq > 0) { 
+    digitalWrite(in1_rearleft, HIGH);
+    digitalWrite(in2_rearleft, LOW);
   }
-  else if (pwmLeft2Req < 0) { // rear left wheel reverse
-    digitalWrite(in1_left2, LOW);
-    digitalWrite(in2_left2, HIGH);
+  // rear left wheel reverse
+  else if (pwmRearLeftReq < 0) { 
+    digitalWrite(in1_rearleft, LOW);
+    digitalWrite(in2_rearleft, HIGH);
   }
-  else if (pwmLeft2Req == 0 && pwmLeft2Out == 0 ) { // rear left wheel stop
-    digitalWrite(in1_left2, LOW);
-    digitalWrite(in2_left2, LOW);
+  // rear left wheel stop
+  else if (pwmRearLeftReq == 0 && pwmRearLeftOut == 0 ) { 
+    digitalWrite(in1_rearleft, LOW);
+    digitalWrite(in2_rearleft, LOW);
   }
-  else { // rear left wheel stop
-    digitalWrite(in1_left2, LOW);
-    digitalWrite(in2_left2, LOW); 
+  else { 
+    digitalWrite(in1_rearleft, LOW);
+    digitalWrite(in2_rearleft, LOW); 
   }
-
-  if (pwmRight2Req > 0) { // rear right wheel forward
-    digitalWrite(in3_right2, HIGH);
-    digitalWrite(in4_right2, LOW);
+  // rear right wheel forward
+  if (pwmRearRightReq > 0) { 
+    digitalWrite(in3_rearright, HIGH);
+    digitalWrite(in4_rearright, LOW);
   }
-  else if (pwmRight2Req < 0) { // rear right wheel reverse
-    digitalWrite(in3_right2, LOW);
-    digitalWrite(in4_right2, HIGH);
+  // rear right wheel reverse
+  else if (pwmRearRightReq < 0) { 
+    digitalWrite(in3_rearright, LOW);
+    digitalWrite(in4_rearright, HIGH);
   }
-  else if (pwmRight2Req == 0 && pwmRight2Out == 0) { // rear right wheel stop
-    digitalWrite(in3_right2, LOW);
-    digitalWrite(in4_right2, LOW);
+  // rear right wheel stop
+  else if (pwmRearRightReq == 0 && pwmRearRightOut == 0) { 
+    digitalWrite(in3_rearright, LOW);
+    digitalWrite(in4_rearright, LOW);
   }
-  else { // rear right wheel stop
-    digitalWrite(in3_right2, LOW);
-    digitalWrite(in4_right2, LOW); 
+  else { 
+    digitalWrite(in3_rearright, LOW);
+    digitalWrite(in4_rearright, LOW); 
   }
-
-  // Increase the required PWM if the robot is not moving
-  if (pwmLeft1Req != 0 && velLeft1Wheel == 0) {
-    pwmLeft1Req *= 1.5;
+  // Increase the required PWM when the robot is not moving
+  if (pwmFrontLeftReq != 0 && velFrontLeftWheel == 0) {
+    pwmFrontLeftReq *= 1.5;
   }
-  if (pwmRight1Req != 0 && velRight1Wheel == 0) {
-    pwmRight1Req *= 1.5;
+  if (pwmFrontRightReq != 0 && velFrontRightWheel == 0) {
+    pwmFrontRightReq *= 1.5;
   }
-  if (pwmLeft2Req != 0 && velLeft2Wheel == 0) {
-    pwmLeft2Req *= 1.5;
+  if (pwmRearLeftReq != 0 && velRearLeftWheel == 0) {
+    pwmRearLeftReq *= 1.5;
   }
-  if (pwmRight2Req != 0 && velRight2Wheel == 0) {
-    pwmRight2Req *= 1.5;
+  if (pwmRearRightReq != 0 && velRearRightWheel == 0) {
+    pwmRearRightReq *= 1.5;
   }
-
-  // Calculate the output PWM value by making slow changes to the current value
-  if (abs(pwmLeft1Req) > pwmLeft1Out) {
-    pwmLeft1Out += PWM_INCREMENT;
+  if (abs(pwmFrontLeftReq) > pwmFrontLeftOut) {
+    pwmFrontLeftOut += PWM_INCREMENT;
   }
-  else if (abs(pwmLeft1Req) < pwmLeft1Out) {
-    pwmLeft1Out -= PWM_INCREMENT;
-  }
-  else{}
-   
-  if (abs(pwmRight1Req) > pwmRight1Out) {
-    pwmRight1Out += PWM_INCREMENT;
-  }
-  else if(abs(pwmRight1Req) < pwmRight1Out) {
-    pwmRight1Out -= PWM_INCREMENT;
+  else if (abs(pwmFrontLeftReq) < pwmFrontLeftOut) {
+    pwmFrontLeftOut -= PWM_INCREMENT;
   }
   else{}
-
-  if (abs(pwmLeft2Req) > pwmLeft2Out) {
-    pwmLeft2Out += PWM_INCREMENT;
+  if (abs(pwmFrontRightReq) > pwmFrontRightOut) {
+    pwmFrontRightOut += PWM_INCREMENT;
   }
-  else if (abs(pwmLeft2Req) < pwmLeft2Out) {
-    pwmLeft2Out -= PWM_INCREMENT;
-  }
-  else{}
-   
-  if (abs(pwmRight2Req) > pwmRight2Out) {
-    pwmRight2Out += PWM_INCREMENT;
-  }
-  else if(abs(pwmRight2Req) < pwmRight2Out) {
-    pwmRight2Out -= PWM_INCREMENT;
+  else if(abs(pwmFrontRightReq) < pwmFrontRightOut) {
+    pwmFrontRightOut -= PWM_INCREMENT;
   }
   else{}
-
-  // Conditional operator to limit PWM output at the maximum 
-  pwmLeft1Out = (pwmLeft1Out > PWM_MAX) ? PWM_MAX : pwmLeft1Out;
-  pwmRight1Out = (pwmRight1Out > PWM_MAX) ? PWM_MAX : pwmRight1Out;
-  pwmLeft2Out = (pwmLeft2Out > PWM_MAX) ? PWM_MAX : pwmLeft2Out;
-  pwmRight2Out = (pwmRight2Out > PWM_MAX) ? PWM_MAX : pwmRight2Out;
-
+  if (abs(pwmRearLeftReq) > pwmRearLeftOut) {
+    pwmRearLeftOut += PWM_INCREMENT;
+  }
+  else if (abs(pwmRearLeftReq) < pwmRearLeftOut) {
+    pwmRearLeftOut -= PWM_INCREMENT;
+  }
+  else{}
+  if (abs(pwmRearRightReq) > pwmRearRightOut) {
+    pwmRearRightOut += PWM_INCREMENT;
+  }
+  else if(abs(pwmRearRightReq) < pwmRearRightOut) {
+    pwmRearRightOut -= PWM_INCREMENT;
+  }
+  else{}
+  // Conditional limit of PWM output to operate at the maximum 
+  pwmFrontLeftOut = (pwmFrontLeftOut > PWM_MAX) ? PWM_MAX : pwmFrontLeftOut;
+  pwmFrontRightOut = (pwmFrontRightOut > PWM_MAX) ? PWM_MAX : pwmFrontRightOut;
+  pwmRearLeftOut = (pwmRearLeftOut > PWM_MAX) ? PWM_MAX : pwmRearLeftOut;
+  pwmRearRightOut = (pwmRearRightOut > PWM_MAX) ? PWM_MAX : pwmRearRightOut;
   // PWM output cannot be less than 0
-  pwmLeft1Out = (pwmLeft1Out < 0) ? 0 : pwmLeft1Out;
-  pwmRight1Out = (pwmRight1Out < 0) ? 0 : pwmRight1Out;
-  pwmLeft2Out = (pwmLeft2Out < 0) ? 0 : pwmLeft2Out;
-  pwmRight2Out = (pwmRight2Out < 0) ? 0 : pwmRight2Out;
- 
-  // Set the PWM value on the pins
-  analogWrite(enA_left1, pwmLeft1Out); 
-  analogWrite(enB_right1, pwmRight1Out);
-  analogWrite(enA_left2, pwmLeft2Out); 
-  analogWrite(enB_right2, pwmRight2Out); 
+  pwmFrontLeftOut = (pwmFrontLeftOut < 0) ? 0 : pwmFrontLeftOut;
+  pwmFrontRightOut = (pwmFrontRightOut < 0) ? 0 : pwmFrontRightOut;
+  pwmRearLeftOut = (pwmRearLeftOut < 0) ? 0 : pwmRearLeftOut;
+  pwmRearRightOut = (pwmRearRightOut < 0) ? 0 : pwmRearRightOut;
+  analogWrite(enA_frontleft, pwmFrontLeftOut); 
+  analogWrite(enB_frontright, pwmFrontRightOut);
+  analogWrite(enA_rearleft, pwmRearLeftOut); 
+  analogWrite(enB_rearright, pwmRearRightOut); 
 }
- 
 // Set up ROS subscriber to the velocity command
 ros::Subscriber<geometry_msgs::Twist> subCmdVel("cmd_vel", &calc_pwm_values);
-
 void setup() {
-  // Set pin states of the encoders
-  pinMode(ENC_IN_LEFT1_A , INPUT_PULLUP);
-  pinMode(ENC_IN_LEFT1_B , INPUT);
-  pinMode(ENC_IN_RIGHT1_A , INPUT_PULLUP);
-  pinMode(ENC_IN_RIGHT1_B , INPUT);
-  pinMode(ENC_IN_LEFT2_A , INPUT_PULLUP);
-  pinMode(ENC_IN_LEFT2_B , INPUT);
-  pinMode(ENC_IN_RIGHT2_A , INPUT_PULLUP);
-  pinMode(ENC_IN_RIGHT2_B , INPUT);
- 
-  // Every time the pin goes high, this is a tick
-  attachInterrupt(digitalPinToInterrupt(ENC_IN_LEFT1_A), left1_wheel_tick, RISING);
-  attachInterrupt(digitalPinToInterrupt(ENC_IN_RIGHT1_A), right1_wheel_tick, RISING);
-  attachInterrupt(digitalPinToInterrupt(ENC_IN_LEFT2_A), left2_wheel_tick, RISING);
-  attachInterrupt(digitalPinToInterrupt(ENC_IN_RIGHT2_A), right2_wheel_tick, RISING);
-   
-  // Motor control pins are outputs
-  pinMode(enA_left1, OUTPUT);
-  pinMode(enB_right1, OUTPUT);
-  pinMode(enA_left2, OUTPUT);
-  pinMode(enB_right2, OUTPUT);
-  pinMode(in1_left1, OUTPUT);
-  pinMode(in2_left1, OUTPUT);
-  pinMode(in3_right1, OUTPUT);
-  pinMode(in4_right1, OUTPUT);
-  pinMode(in1_left2, OUTPUT);
-  pinMode(in2_left2, OUTPUT);
-  pinMode(in3_right2, OUTPUT);
-  pinMode(in4_right2, OUTPUT);
-  
-  // Turn off motors - Initial state
-  digitalWrite(in1_left1, LOW);
-  digitalWrite(in2_left1, LOW);
-  digitalWrite(in3_right1, LOW);
-  digitalWrite(in4_right1, LOW);
-  digitalWrite(in1_left2, LOW);
-  digitalWrite(in2_left2, LOW);
-  digitalWrite(in3_right2, LOW);
-  digitalWrite(in4_right2, LOW);
-  
-  // Set the motor speed
-  analogWrite(enA_left1, 0); 
-  analogWrite(enB_right1, 0);
-  analogWrite(enA_left2, 0); 
-  analogWrite(enB_right2, 0);
- 
-  // ROS Setup
+  pinMode(ENC_IN_FRONTLEFT_A , INPUT_PULLUP);
+  pinMode(ENC_IN_FRONTLEFT_B , INPUT);
+  pinMode(ENC_IN_FRONTRIGHT_A , INPUT_PULLUP);
+  pinMode(ENC_IN_FRONTRIGHT_B , INPUT);
+  pinMode(ENC_IN_REARLEFT_A , INPUT_PULLUP);
+  pinMode(ENC_IN_REARLEFT_B , INPUT);
+  pinMode(ENC_IN_REARRIGHT_A , INPUT_PULLUP);
+  pinMode(ENC_IN_REARRIGHT_B , INPUT);
+  // the ISR should trigger when the input signal goes from low to high
+  attachInterrupt(digitalPinToInterrupt(ENC_IN_FRONTLEFT_A), frontleft_wheel_tick, RISING);
+  attachInterrupt(digitalPinToInterrupt(ENC_IN_FRONTRIGHT_A), frontright_wheel_tick, RISING);
+  attachInterrupt(digitalPinToInterrupt(ENC_IN_REARLEFT_A), rearleft_wheel_tick, RISING);
+  attachInterrupt(digitalPinToInterrupt(ENC_IN_REARRIGHT_A), rearright_wheel_tick, RISING);
+  pinMode(enA_frontleft, OUTPUT);
+  pinMode(enB_frontright, OUTPUT);
+  pinMode(enA_rearleft, OUTPUT);
+  pinMode(enB_rearright, OUTPUT);
+  pinMode(in1_frontleft, OUTPUT);
+  pinMode(in2_frontleft, OUTPUT);
+  pinMode(in3_frontright, OUTPUT);
+  pinMode(in4_frontright, OUTPUT);
+  pinMode(in1_rearleft, OUTPUT);
+  pinMode(in2_rearleft, OUTPUT);
+  pinMode(in3_rearright, OUTPUT);
+  pinMode(in4_rearright, OUTPUT);
+  // Turn off motors in initial state
+  digitalWrite(in1_frontleft, LOW);
+  digitalWrite(in2_frontleft, LOW);
+  digitalWrite(in3_frontright, LOW);
+  digitalWrite(in4_frontright, LOW);
+  digitalWrite(in1_rearleft, LOW);
+  digitalWrite(in2_rearleft, LOW);
+  digitalWrite(in3_rearright, LOW);
+  digitalWrite(in4_rearright, LOW);
+  // Set the motor speed in initial state
+  analogWrite(enA_frontleft, 0); 
+  analogWrite(enB_frontright, 0);
+  analogWrite(enA_rearleft, 0); 
+  analogWrite(enB_rearright, 0);
   nh.getHardware()->setBaud(115200);
   nh.initNode();
-  nh.advertise(Left1Pub);
-  nh.advertise(Right1Pub);
-  nh.advertise(Left2Pub);
-  nh.advertise(Right2Pub);
+  nh.advertise(FrontLeftPub);
+  nh.advertise(FrontRightPub);
+  nh.advertise(RearLeftPub);
+  nh.advertise(RearRightPub);
   nh.subscribe(subCmdVel);
 }
-
 void loop() {
-
-  nh.spinOnce();
-   
-  // Record the time
+  nh.spinOnce(); 
   currentMillis = millis();
- 
-  // If the time interval has passed, publish the number of ticks,
-  // and calculate the velocities.
+  // If the time interval has passed, publish the number of ticks, and calculate the velocities.
   if (currentMillis - previousMillis > interval) {
-     
     previousMillis = currentMillis;
-
     // Publish tick counts to topics
-    Left1Pub.publish( &left1_wheel_tick_count );
-    Right1Pub.publish( &right1_wheel_tick_count );
-    Left2Pub.publish( &left2_wheel_tick_count );
-    Right2Pub.publish( &right2_wheel_tick_count );
- 
-    // Calculate the velocity of the right and left wheels
-    calc_vel_right1_wheel();
-    calc_vel_left1_wheel();
-    calc_vel_right2_wheel();
-    calc_vel_left2_wheel();
+    FrontLeftPub.publish( &frontleft_wheel_tick_count );
+    FrontRightPub.publish( &frontright_wheel_tick_count );
+    RearLeftPub.publish( &rearleft_wheel_tick_count );
+    RearRightPub.publish( &rearright_wheel_tick_count );
+    // Calculate the velocity of the wheels
+    calc_vel_frontright_wheel();
+    calc_vel_frontleft_wheel();
+    calc_vel_rearright_wheel();
+    calc_vel_rearleft_wheel();
      
   }
-   
-  // Stop the car if there are no cmd_vel messages
   if((millis()/1000) - lastCmdVelReceived > 1) {
-    pwmLeft1Req = 0;
-    pwmRight1Req = 0;
-    pwmLeft2Req = 0;
-    pwmRight2Req = 0;
+    pwmFrontLeftReq = 0;
+    pwmFrontRightReq = 0;
+    pwmRearLeftReq = 0;
+    pwmRearRightReq = 0;
   }
- 
   set_pwm_values();
 } 
