@@ -193,7 +193,7 @@ int main(int argc, char **argv) {
   odomOld.pose.pose.position.y = initialY;
   odomOld.pose.pose.orientation.z = initialTheta;
   // Launch ROS and create a node
-  ros::init(argc, argv, "ekf_odom_pub");
+  ros::init(argc, argv, "odom_pub");
   ros::NodeHandle node;
   // Subscribe to ROS topics
   ros::Subscriber subForFrontRightCount = node.subscribe("frontright_ticks", 100, Calc_FrontRight, ros::TransportHints().tcpNoDelay());
