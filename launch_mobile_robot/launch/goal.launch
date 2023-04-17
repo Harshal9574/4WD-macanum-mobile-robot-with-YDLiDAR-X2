@@ -1,0 +1,4 @@
+<launch>  
+  <node pkg="navstack_pub" type="send_goals" name="send_goals">
+  </node>
+</launch>

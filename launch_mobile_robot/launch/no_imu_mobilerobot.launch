@@ -1,0 +1,46 @@
+<launch>
+
+  <node pkg="rosserial_python" type="serial_node.py" name="serial_node">
+    <param name="port" value="/dev/ttyUSB1"/>
+    <param name="baud" value="115200"/>
+  </node>
+
+
+<!-- Lidar Data Publisher Using YDLIDAR from Slamtec -->
+  <include file="$(find ydlidar_ros_driver)/launch/X2.launch" />
+
+
+<!-- Initial Pose and Goal Publisher -->
+<!-- Publish: /initialpose, /move_base_simple/goal -->
+  <node pkg="rviz" type="rviz" name="rviz" args="-d /home/ubuntu/catkin_ws/src/mobile_robot/launch_mobile_robot/launch/display_origin_axis.rviz">
+  </node>  
+
+
+<!-- Subscribe: /initialpose, /move_base_simple/goal -->
+<!-- Publish: /initial_2d, /goal_2d --> 
+  <node pkg="localization_data_pub" type="rviz_click_to_2d" name="rviz_click_to_2d">
+  </node>   
+
+
+<!-- Odometry Publisher -->
+<!-- Subscribe: /right_ticks, /left_ticks, /initial_2d -->
+<!-- Publish: /odom_data_euler, /odom_data_quat -->
+  <node pkg="localization_data_pub" type="ekf_odom_pub" name="ekf_odom_pub">
+  </node>
+
+<!-- Drive Controller -->
+<!-- Subscribe: /robot_pose_ekf/odom_combined, /waypoint_2d -->
+<!-- Publish: /cmd_vel -->
+  <remap from="waypoint_2d" to="goal_2d" />
+  <node pkg="navigation_data_pub" type="drive_controller" name="drive_controller">
+  </node> 
+	
+</launch>
+	
+
+
+
+
+
+  
+ 
